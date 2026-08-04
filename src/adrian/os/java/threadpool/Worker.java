@@ -19,7 +19,7 @@ public class Worker implements Runnable {
     protected Worker(final CustomThreadPool customThreadPool, final boolean keepAlive) {
         this.threadPool = customThreadPool;
         this.core = keepAlive;
-        this.thread = this.threadPool.getThreadFactory().newThread(this);
+        this.thread = getThreadPool().getThreadFactory().newThread(this);
     }
 
     /**
@@ -54,19 +54,19 @@ public class Worker implements Runnable {
     public void run() {
         try {
             Runnable task;
-            while (!this.thread.isInterrupted() && !this.threadPool.isTerminated() && ((task = getTask()) != null)) {
+            while (!getThread().isInterrupted() && !getThreadPool().isTerminated() && ((task = getTask()) != null)) {
                 runTask(task);
             }
         }
         finally {
-            this.threadPool.stopWorker(this);
+            getThreadPool().stopWorker(this);
         }
     }
 
     private Runnable getTask() {
         // event B (see CustomThreadPool.workerDemand javadoc): this task leaving the queue and this worker leaving
         // the idle pool happen together, so their effect on workerDemand cancels out - no counter update needed here.
-        return this.threadPool.pollTask(this);
+        return getThreadPool().pollTask(this);
     }
 
     private void runTask(final Runnable task) {
@@ -78,7 +78,7 @@ public class Worker implements Runnable {
             handleTaskError(e);
         }
         finally {
-            this.threadPool.onWorkerIdle();
+            getThreadPool().onWorkerIdle();
         }
     }
 
@@ -88,7 +88,7 @@ public class Worker implements Runnable {
      * Callers can customize it via the {@link CustomThreadPool}'s {@link java.util.concurrent.ThreadFactory}.
      */
     protected void handleTaskError(final Exception exception) {
-        this.thread.getUncaughtExceptionHandler().uncaughtException(this.thread, exception);
+        getThread().getUncaughtExceptionHandler().uncaughtException(getThread(), exception);
     }
 
 }
