@@ -264,7 +264,7 @@ public class CustomThreadPool extends AbstractExecutorService {
 
     /**
      * set the thread pool state. The polling behavior for workers follows directly from
-     * {@link ThreadPoolState#pollTask(Worker)}.
+     * {@link ThreadPoolState#pollTask(ThreadPoolState.WorkerPollContext)}.
      */
     protected synchronized void setState(final ThreadPoolState state) {
         this.state = state;
@@ -346,7 +346,9 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     protected Runnable pollTask(final Worker worker) {
-        return getState().pollTask(worker);
+        var context = new ThreadPoolState.WorkerPollContext(this.tasks, this.idleTime, worker.isCore(),
+                worker.getThread(), this::isRunning);
+        return getState().pollTask(context);
     }
 
     /**
