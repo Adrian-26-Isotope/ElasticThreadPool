@@ -11,6 +11,7 @@ import java.lang.management.ThreadMXBean;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -48,6 +49,39 @@ class CustomThreadPoolTest {
         customThreadPool.submit(createRunnable(5000));
         assertEquals(2, customThreadPool.getWorkers().size(), " Max thread count must not exceed 2");
 
+        customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testDefaultQueueCapacity() {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
+        assertEquals(CustomThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
+                "default queue capacity should be " + CustomThreadPool.DEFAULT_QUEUE_CAPACITY);
+        customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testCustomQueue() throws InterruptedException {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(1)
+                .setQueue(new ArrayBlockingQueue<>(2)).start();
+        // occupies the sole worker
+        customThreadPool.submit(createRunnable(5000));
+        Thread.sleep(50);
+        // fills the custom queue's capacity of 2
+        customThreadPool.submit(createRunnable(5000));
+        customThreadPool.submit(createRunnable(5000));
+        assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(5000)),
+                "custom queue capacity should be enforced");
+
+        customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testSetQueueNullResetsToDefault() {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setQueue(new ArrayBlockingQueue<>(5))
+                .setQueue(null).start();
+        assertEquals(CustomThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
+                "setQueue(null) should reset to the default bounded queue");
         customThreadPool.shutdownNow();
     }
 
@@ -95,10 +129,10 @@ class CustomThreadPoolTest {
             assertEquals(3, pool3.getWorkers().size(), "implausible worker amount in cycle " + cycle);
             assertEquals(8, pool4.getWorkers().size(), "implausible worker amount in cycle " + cycle);
 
-            assertEquals(0, pool1.workerDemand.get(), "implausible worker demand in cycle " + cycle);
-            assertEquals(-2, pool2.workerDemand.get(), "implausible worker demand in cycle " + cycle);
-            assertEquals(5, pool3.workerDemand.get(), "implausible worker demand in cycle " + cycle);
-            assertEquals(-8, pool4.workerDemand.get(), "implausible worker demand in cycle " + cycle);
+            assertEquals(0, pool1.getWorkerDemand(), "implausible worker demand in cycle " + cycle);
+            assertEquals(-2, pool2.getWorkerDemand(), "implausible worker demand in cycle " + cycle);
+            assertEquals(5, pool3.getWorkerDemand(), "implausible worker demand in cycle " + cycle);
+            assertEquals(-8, pool4.getWorkerDemand(), "implausible worker demand in cycle " + cycle);
 
             // interrupt the long-running tasks so the next cycle can start promptly
             pool3.shutdownNow();
@@ -110,10 +144,10 @@ class CustomThreadPoolTest {
         pool3.shutdownNow();
         pool4.shutdownNow();
         assertTrue(pool4.awaitTermination(1, TimeUnit.SECONDS));
-        assertEquals(0, pool1.workerDemand.get(), "implausible worker demand after shutdown");
-        assertEquals(0, pool2.workerDemand.get(), "implausible worker demand after shutdown");
-        assertEquals(0, pool3.workerDemand.get(), "implausible worker demand after shutdown");
-        assertEquals(0, pool4.workerDemand.get(), "implausible worker demand after shutdown");
+        assertEquals(0, pool1.getWorkerDemand(), "implausible worker demand after shutdown");
+        assertEquals(0, pool2.getWorkerDemand(), "implausible worker demand after shutdown");
+        assertEquals(0, pool3.getWorkerDemand(), "implausible worker demand after shutdown");
+        assertEquals(0, pool4.getWorkerDemand(), "implausible worker demand after shutdown");
 
     }
 

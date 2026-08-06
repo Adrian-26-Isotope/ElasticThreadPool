@@ -78,8 +78,8 @@ public class Worker implements Runnable {
     }
 
     private Runnable getTask() {
-        // event B (see CustomThreadPool.workerDemand javadoc): this task leaving the queue and this worker leaving
-        // the idle pool happen together, so their effect on workerDemand cancels out - no counter update needed here.
+        // event B (see WorkerDemand javadoc): this task leaving the queue and this worker leaving the idle pool
+        // happen together, so their effect on workerDemand cancels out - no counter update needed here.
         return getThreadPool().pollTask(this);
     }
 

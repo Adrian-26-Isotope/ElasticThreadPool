@@ -15,6 +15,68 @@ A flexible and efficient custom thread pool implementation in Java that provides
 - **Standard ExecutorService Interface**: Implements `AbstractExecutorService` for compatibility
 - **Configurable Exception Handling**: Task failures are reported through the worker thread's `Thread.UncaughtExceptionHandler`
 
+## Motivation: why not `ThreadPoolExecutor`?
+
+The JDK's `ThreadPoolExecutor` cannot buffer tasks *and* scale threads with the actual backlog. Its
+sizing policy is hard-coded in `execute()` and triggered by **queue rejection**, not by load:
+
+```java
+if (workerCount < corePoolSize)      addWorker(command, true);  // 1: fill core
+else if (workQueue.offer(command))   ;                          // 2: queued — and that's all
+else if (!addWorker(command, false)) reject(command);           // 3: only if the queue refused
+```
+
+A thread is created only when the queue *refuses* a task. That leads to:
+
+| Queue | Behavior |
+|-------|----------|
+| `LinkedBlockingQueue` (unbounded) | `offer()` never fails → step 3 is unreachable. **`maximumPoolSize` is silently ignored**; the pool never exceeds `corePoolSize`. |
+| `LinkedBlockingQueue(capacity)` | Grows only once the queue is *completely full* — scale-up as a last resort, after latency has built up. |
+| `SynchronousQueue` (`newCachedThreadPool`) | Immediate scale-up, but **no buffering at all**. |
+
+No configuration gives demand-proportional scaling with buffering, and the policy is not pluggable.
+The known workaround — Apache Tomcat's `TaskQueue`, which overrides `offer()` to falsely report
+"full" so step 3 fires, then re-queues on the resulting `RejectedExecutionException` — was rejected
+here because it relies on undocumented `ThreadPoolExecutor` internals.
+
+### What this pool does instead
+
+Scale-up is driven by a measured backlog signal, `workerDemand` (`pendingTasks − idleWorkers`),
+rather than by queue rejection:
+
+```java
+while ((workerDemand.get() > 0) && (workers.size() < maxThreads)) {
+    startWorker(false);
+}
+```
+
+If work is waiting and nobody is free, a worker appears — while the queue keeps buffering. The
+decision runs on the dedicated `WorkerAdjuster` thread, so `execute()` returns immediately and
+concurrent submitters aren't serialized behind the sizing logic.
+
+### Comparison
+
+| Aspect | `ThreadPoolExecutor` | `CustomThreadPool` |
+|--------|----------------------|--------------------|
+| Scale-up trigger | Queue `offer()` returns `false` | `workerDemand > 0` (real backlog) |
+| Scale-up with unbounded queue | **Never happens** | Works normally |
+| Buffering + elasticity together | Not expressible | Yes |
+| Where sizing runs | Caller thread, under `mainLock` | Dedicated `WorkerAdjuster` thread |
+| Sizing policy location | Hard-coded in `execute()` | Isolated in `performAdjustment()` |
+| Default threads | Platform | Virtual |
+| Rejection policy | 4 pluggable handlers | Fixed `RejectedExecutionException` |
+| Bounded queue / backpressure | Yes | Yes — bounded by default (capacity `10,000`) |
+| Execution hooks | `beforeExecute` / `afterExecute` | None |
+| Metrics | `getPoolSize`, `getActiveCount`, … | `getCompletedTasksCount()` only |
+| Pluggable queue | Yes | Yes — `setQueue(BlockingQueue<Runnable>)` |
+
+With the default virtual-thread factory, thread creation is cheap enough that reuse isn't the point
+— in that mode this is best understood as an **elastic concurrency limiter with idle-based decay**,
+which neither `ThreadPoolExecutor` nor `Executors.newVirtualThreadPerTaskExecutor()` plus a
+semaphore provides.
+
+Unlike Jetty's `QueuedThreadPool` (which is tightly coupled to Jetty internals such as leased/reserved threads and adaptive execution modes), this project stays a small, generic `ExecutorService` focused on backlog-driven scaling.
+
 ## Quick Start
 
 ### Basic Usage
@@ -69,9 +131,10 @@ threadPool.shutdown();
 |-----------|---------------|-------------|
 | `name` | JVM default | Name prefix for worker threads |
 | `minThreads` | `0` | Minimum number of core threads that persist even when idle |
-| `maxThreads` | `Integer.MAX_VALUE` | Maximum number of threads that can be created |
-| `idleTime` | `10 seconds` | Time after which idle non-core threads are terminated. Only governs non-core workers; core threads (up to `minThreads`) always wait indefinitely for the next task, regardless of `idleTime`, including `Duration.ZERO` |
+| `maxThreads` | `256` | Maximum number of threads that can be created |
+| `idleTime` | `1 second` | Time after which idle non-core threads are terminated. Only governs non-core workers; core threads (up to `minThreads`) always wait indefinitely for the next task, regardless of `idleTime`, including `Duration.ZERO` |
 | `threadFactory` | `Thread.ofVirtual().factory()` | Factory for creating new threads |
+| `queue` | bounded `LinkedBlockingQueue` (capacity `10,000`) | Task queue used to buffer submitted tasks. Supply your own via `setQueue(BlockingQueue<Runnable>)` for a different capacity (e.g. `new LinkedBlockingQueue<>(5_000)`), an unbounded queue, or a different implementation entirely. |
 
 ## Architecture
 

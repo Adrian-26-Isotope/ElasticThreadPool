@@ -11,13 +11,54 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * This thread pool implementation uses a variable amount of threads to process submitted tasks.
+ * This thread pool implementation uses a variable amount of threads to process submitted tasks.<br>
+ * <br>
+ * <b>Why not {@link java.util.concurrent.ThreadPoolExecutor}?</b><br>
+ * This pool exists because {@code ThreadPoolExecutor} cannot express "buffer tasks <em>and</em> grow the worker count
+ * in proportion to the actual backlog". Its sizing policy is hard-coded into {@code execute()} and is driven by
+ * <em>queue rejection</em> rather than by load:
+ *
+ * <pre>
+ * if (workerCount &lt; corePoolSize)      addWorker(command, true);  // 1: fill core
+ * else if (workQueue.offer(command))   ;                          // 2: queued - and that is all
+ * else if (!addWorker(command, false)) reject(command);           // 3: only if the queue refused
+ * </pre>
+ *
+ * Step 2 is the decisive one: a new thread is created only once the queue <em>refuses</em> a task. The consequences
+ * are:
+ * <ul>
+ * <li>with an unbounded queue, {@code offer()} never fails, so step 3 is unreachable and {@code maximumPoolSize} is
+ * silently ignored - the pool never grows past {@code corePoolSize};</li>
+ * <li>with a bounded queue, the pool only grows once the queue is completely full, i.e. scale-up is a last resort that
+ * happens after latency has already accumulated;</li>
+ * <li>with a {@code SynchronousQueue}, scale-up is immediate but there is no buffering at all.</li>
+ * </ul>
+ * No combination of those settings yields demand-proportional scaling with buffering, and the policy is not
+ * pluggable.<br>
+ * <br>
+ * <b>The replacement policy</b><br>
+ * Scale-up here is driven by {@link #workerDemand} ({@code pendingTasks - idleWorkers}), a measured backlog signal,
+ * instead of by queue rejection: see {@link #performAdjustment()}. If work is waiting and no worker is free, a worker
+ * is created, while the queue keeps buffering. That decision runs on a dedicated {@link WorkerAdjuster} thread rather
+ * than the caller's, so {@link #execute(Runnable)} returns immediately and concurrent submitters are not serialized
+ * behind the sizing logic.<br>
+ * <br>
+ * <b>Virtual threads</b><br>
+ * The default thread factory produces virtual threads, where thread creation is cheap enough that reuse is not the
+ * point. In that mode this class is best understood as an <em>elastic concurrency limiter</em> with idle-based decay -
+ * something neither {@code ThreadPoolExecutor} nor {@code Executors.newVirtualThreadPerTaskExecutor()} combined with a
+ * semaphore provides.
  */
 public class CustomThreadPool extends AbstractExecutorService {
+
+    /**
+     * default capacity of the task queue used when no queue is explicitly supplied (see
+     * {@link CustomThreadPoolBuilder#setQueue(BlockingQueue)}): {@value}.
+     */
+    public static final int DEFAULT_QUEUE_CAPACITY = 10_000;
 
     private final int minThreads;
     private final int maxThreads;
@@ -32,54 +73,35 @@ public class CustomThreadPool extends AbstractExecutorService {
      */
     private final AtomicLong completedTasksCount = new AtomicLong(0);
     /**
-     * net demand for workers, i.e. {@code pendingTasks - idleWorkers}, maintained incrementally. Each event below
-     * applies exactly one atomic increment/decrement:
-     * <ul>
-     * <li>event A, {@code +1}: a task is enqueued ({@link #offer2Queue(Runnable)}): one more task is waiting for a
-     * worker.</li>
-     * <li>event D, {@code -1}: a worker is newly started ({@link #startWorker(boolean)}): it begins idle, adding
-     * capacity.</li>
-     * <li>event C, {@code -1}: a worker finishes a task and goes idle again ({@link #onWorkerIdle()}, called from
-     * {@link Worker}): it becomes available again, adding capacity.</li>
-     * <li>event E, {@code +1}: a worker terminates ({@link #stopWorker(Worker)}): idle capacity is removed again.
-     * Unconditional - event F (a worker terminating while still busy) never happens with this {@link Worker}
-     * implementation, since its run loop only ever exits in the idle state (see {@link #stopWorker(Worker)}).</li>
-     * <li>event G, {@code -N}: {@code N} queued tasks are discarded unclaimed ({@link #shutdownNow()} draining the
-     * queue): demand raised for them at enqueue time must be withdrawn since no worker will ever claim them.</li>
-     * </ul>
-     * Event B, a worker successfully claiming/dequeuing a task ({@code Worker.getTask()}), is deliberately NOT one of
-     * those events: the task leaving the queue and that worker leaving the idle pool happen together, so their
-     * contributions cancel out (net zero).
+     * net demand for workers, i.e. {@code pendingTasks - idleWorkers}, maintained incrementally by named event methods
+     * - see {@link WorkerDemand} for the full event protocol (A-G).
      */
-    protected final AtomicInteger workerDemand = new AtomicInteger(0);
+    private final WorkerDemand workerDemand = new WorkerDemand();
 
     /**
-     * @return a {@link CustomThreadPool} builder.<br>
-     *         Default values are:<br>
-     *         - name = JVM default<br>
-     *         - minimum threads = 0<br>
-     *         - maximum threads = {@link Integer#MAX_VALUE}<br>
-     *         - thread idle time = {@code Duration.ofSeconds(10)}<br>
-     *         - thread factory ={@code Thread.ofVirtual().factory()}<br>
+     * @return a {@link CustomThreadPool} builder.
      */
     public static CustomThreadPoolBuilder builder() {
         return new CustomThreadPoolBuilder();
     }
 
     /**
-     * Constructs a new thread pool with the given parameters. Needs to be started with {@link #start()} before it can
-     * be used.
+     * Constructs a new thread pool with the given parameters and a caller-supplied task queue. Needs to be started with
+     * {@link #start()} before it can be used.
      *
      * @param minThreads the minimum amount of threads that shall not be terminated if idle. Must be greater than or
      *            equal to 0 and less than or equal to maxThreads.
      * @param maxThreads the maximum amount of threads created if enough tasks are submitted. Must be greater than 0
      *            and greater than or equal to minThreads.
      * @param idleDuration the duration after which threads will be terminated. Negative durations will be treated as
-     *            {@code Duration.ZERO}.
-     * @param threadFact a factory to define thread creation.
+     *                     {@code Duration.ZERO}.
+     * @param threadFact   a factory to define thread creation.
+     * @param queue        the queue used to buffer submitted tasks before a worker picks them up. Callers may supply a
+     *                     bounded queue of any capacity, an unbounded queue, or any other {@link BlockingQueue}
+     *                     implementation (e.g. {@code PriorityBlockingQueue}). Must not be {@code null}.
      */
     public CustomThreadPool(final int minThreads, final int maxThreads, final Duration idleDuration,
-            final ThreadFactory threadFact) {
+            final ThreadFactory threadFact, final BlockingQueue<Runnable> queue) {
         if ((minThreads < 0) || (maxThreads < 1) || (minThreads > maxThreads)) {
             throw new IllegalArgumentException("invalid min/max threads: min=" + minThreads + ", max=" + maxThreads);
         }
@@ -88,7 +110,7 @@ public class CustomThreadPool extends AbstractExecutorService {
         this.maxThreads = maxThreads;
         this.idleTime = idleDuration.isNegative() ? Duration.ZERO : idleDuration;
         this.threadFactory = threadFact;
-        this.tasks = new LinkedBlockingQueue<>();
+        this.tasks = Objects.requireNonNull(queue, "queue must not be null");
         this.workers = Collections.synchronizedList(new ArrayList<>(minThreads));
     }
 
@@ -125,6 +147,13 @@ public class CustomThreadPool extends AbstractExecutorService {
      */
     protected List<Worker> getWorkers() {
         return this.workers;
+    }
+
+    /**
+     * @return the current worker demand ({@code pendingTasks - idleWorkers}).
+     */
+    int getWorkerDemand() {
+        return this.workerDemand.get();
     }
 
     /**
@@ -172,8 +201,8 @@ public class CustomThreadPool extends AbstractExecutorService {
         if (getState() == ThreadPoolState.RUNNING) {
             boolean offered = this.tasks.offer(task);
             if (offered) {
-                // event A (see workerDemand javadoc): a pending task raises demand for a worker.
-                this.workerDemand.incrementAndGet();
+                // event A (see WorkerDemand javadoc): a pending task raises demand for a worker.
+                this.workerDemand.recordTaskEnqueued();
             }
             return offered;
         }
@@ -213,18 +242,18 @@ public class CustomThreadPool extends AbstractExecutorService {
     private Worker startWorker(final boolean keepAlive) {
         Worker worker = new Worker(this, keepAlive);
         this.workers.add(worker);
-        // event D (see workerDemand javadoc): a freshly started worker begins idle.
-        this.workerDemand.decrementAndGet();
+        // event D (see WorkerDemand javadoc): a freshly started worker begins idle.
+        this.workerDemand.recordWorkerStarted();
         worker.getThread().start();
         return worker;
     }
 
     /**
-     * called by a {@link Worker} once it goes idle again after completing a task (event C, see {@link #workerDemand}
+     * called by a {@link Worker} once it goes idle again after completing a task (event C, see {@link WorkerDemand}
      * javadoc).
      */
     void onWorkerIdle() {
-        this.workerDemand.decrementAndGet();
+        this.workerDemand.recordWorkerIdle();
     }
 
     /**
@@ -237,12 +266,11 @@ public class CustomThreadPool extends AbstractExecutorService {
             this.workers.remove(worker);
             this.completedTasksCount.addAndGet(worker.getCompletedTasksCount());
         }
-        // event E (see workerDemand javadoc): a terminating worker leaving removes idle capacity, raising demand
+        // event E (see WorkerDemand javadoc): a terminating worker leaving removes idle capacity, raising demand
         // back up. Unconditional because Worker.run()'s loop only ever exits right after onWorkerIdle() has already
         // run (or before ever claiming a task), i.e. always in the idle state - event F (a busy worker terminating)
         // never actually happens with this Worker implementation.
-        this.workerDemand.incrementAndGet();
-        worker.getThread().interrupt();
+        this.workerDemand.recordWorkerStopped();
         checkTermination();
     }
 
@@ -296,9 +324,9 @@ public class CustomThreadPool extends AbstractExecutorService {
 
             // 2nd: cancel all pending tasks
             this.tasks.drainTo(unfinishedTask);
-            // event G (see workerDemand javadoc): drained tasks were never claimed by a worker, so demand raised for
+            // event G (see WorkerDemand javadoc): drained tasks were never claimed by a worker, so demand raised for
             // them at enqueue time must be withdrawn now that they're gone from the queue.
-            this.workerDemand.addAndGet(-unfinishedTask.size());
+            this.workerDemand.recordTasksDiscarded(unfinishedTask.size());
 
             // 3rd: interrupt all running threads
             synchronized (this.workers) {
@@ -364,9 +392,10 @@ public class CustomThreadPool extends AbstractExecutorService {
 
         private String name = "";
         private int minThreads = 0;
-        private int maxThreads = Integer.MAX_VALUE;
-        private Duration idleDuration = Duration.ofSeconds(10);
+        private int maxThreads = 256;
+        private Duration idleDuration = Duration.ofSeconds(1);
         private ThreadFactory threadFactory;
+        private BlockingQueue<Runnable> queue;
 
         /**
          * Set the name for the worker threads.<br>
@@ -391,7 +420,7 @@ public class CustomThreadPool extends AbstractExecutorService {
         /**
          * Set the maximum amount of threads.<br>
          * <br>
-         * Default is {@link Integer#MAX_VALUE}.
+         * Default is 256.
          */
         public CustomThreadPoolBuilder setMaxThreads(final int max) {
             this.maxThreads = max;
@@ -401,7 +430,7 @@ public class CustomThreadPool extends AbstractExecutorService {
         /**
          * Set the idle time after its expiration a thread will be terminated.<br>
          * <br>
-         * Default is 10 seconds.
+         * Default is 1 seconds.
          */
         public CustomThreadPoolBuilder setIdleTime(final Duration idleTime) {
             this.idleDuration = idleTime;
@@ -419,6 +448,21 @@ public class CustomThreadPool extends AbstractExecutorService {
         }
 
         /**
+         * Set the queue used to buffer submitted tasks before a worker picks them up. Use this to change the default
+         * capacity (e.g. {@code new LinkedBlockingQueue<>(5_000)}), use an unbounded queue, or plug in a different
+         * {@link BlockingQueue} implementation entirely.<br>
+         * <br>
+         * Default is a bounded {@link LinkedBlockingQueue} with capacity
+         * {@link CustomThreadPool#DEFAULT_QUEUE_CAPACITY}. Passing {@code null} resets to that default.
+         *
+         * @param queue the task queue to use, or {@code null} to reset to the default bounded queue.
+         */
+        public CustomThreadPoolBuilder setQueue(final BlockingQueue<Runnable> queue) {
+            this.queue = queue;
+            return this;
+        }
+
+        /**
          * @return the newly constructed, un-started {@link CustomThreadPool}.
          */
         public CustomThreadPool build() {
@@ -430,7 +474,10 @@ public class CustomThreadPool extends AbstractExecutorService {
                     this.threadFactory = Thread.ofVirtual().factory();
                 }
             }
-            return new CustomThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory);
+            BlockingQueue<Runnable> effectiveQueue = this.queue != null ? this.queue
+                    : new LinkedBlockingQueue<>(CustomThreadPool.DEFAULT_QUEUE_CAPACITY);
+            return new CustomThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory,
+                    effectiveQueue);
         }
 
         /**

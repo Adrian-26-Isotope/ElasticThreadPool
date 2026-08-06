@@ -35,5 +35,5 @@ replay_pid*
 .vscode/
 
 # user specifics
-mvn-test-jdk25.bat
-mvn-compile-jdk25.bat
+/.mvn
+mvn-jdk25.bat
