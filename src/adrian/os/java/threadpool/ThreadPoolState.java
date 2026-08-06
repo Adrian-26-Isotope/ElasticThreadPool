@@ -3,7 +3,6 @@ package adrian.os.java.threadpool;
 import java.time.Duration;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 /**
  * State of a {@link CustomThreadPool}. Each constant also defines how a {@link Worker} polls for its next task while
@@ -18,29 +17,34 @@ enum ThreadPoolState {
     RUNNING {
         /**
          * {@inheritDoc}<br>
-         * Only non core threads can return null tasks.
+         * Core workers block indefinitely for the next task; non core workers give up (returning null) after
+         * {@code idleTime}. Either way, an interrupt (e.g. from {@link Worker#interruptIfIdle()}) never discards a task
+         * that is already sitting in the queue: since {@code take()}/{@code poll(timeout, unit)} throw
+         * {@link InterruptedException} immediately if the calling thread is already interrupted - even when a task is
+         * available and would otherwise have been returned without any actual waiting - a final non-blocking
+         * {@code poll()} is attempted before giving up, exactly like the (already interrupt-agnostic)
+         * {@link ThreadPoolState#SHUTDOWN} behavior below.
          */
         @Override
         public Runnable pollTask(final WorkerPollContext context) {
-            Runnable task = null;
             Thread thread = context.thread();
-            // a just-queued task is always polled at least once,
-            // even if the pool state flips RUNNING->SHUTDOWN between dispatch
-            // (getState().pollTask()) and this loop's isRunning() check - otherwise
-            // that task is silently stranded forever (see checkTermination()).
-            do {
+            if (context.core()) {
                 try {
-                    task = context.tasks().poll(context.idleTime().toNanos(), TimeUnit.NANOSECONDS);
+                    return context.tasks().take();
                 }
                 catch (InterruptedException _) {
                     thread.interrupt();
+                    return context.tasks().poll();
                 }
-                if ((task != null) || !context.core()) {
-                    // core workers will continue polling if task is null
-                    return task;
-                }
-            } while (!thread.isInterrupted() && context.runningCheck().getAsBoolean());
-            return task;
+            }
+
+            try {
+                return context.tasks().poll(context.idleTime().toNanos(), TimeUnit.NANOSECONDS);
+            }
+            catch (InterruptedException _) {
+                thread.interrupt();
+                return context.tasks().poll();
+            }
         }
     },
 
@@ -72,14 +76,12 @@ enum ThreadPoolState {
      * Immutable snapshot of exactly what a {@link ThreadPoolState} needs to poll the next task for a worker, decoupling
      * this state machine from the {@link Worker}/{@link CustomThreadPool} types themselves.
      *
-     * @param tasks        the task queue to poll from.
-     * @param idleTime     the duration a worker may block waiting for a task before giving up.
-     * @param core         whether the polling worker is a core worker (kept alive despite a null poll while RUNNING).
-     * @param thread       the polling worker's own thread, used to react to interruption.
-     * @param runningCheck supplies whether the owning thread pool is still in the RUNNING state.
+     * @param tasks    the task queue to poll from.
+     * @param idleTime the duration a non core worker may block waiting for a task before giving up.
+     * @param core     whether the polling worker is a core worker (blocks indefinitely for a task while RUNNING).
+     * @param thread   the polling worker's own thread, used to react to interruption.
      */
-    record WorkerPollContext(BlockingQueue<Runnable> tasks, Duration idleTime, boolean core, Thread thread,
-            BooleanSupplier runningCheck) {
+    record WorkerPollContext(BlockingQueue<Runnable> tasks, Duration idleTime, boolean core, Thread thread) {
     }
 
     /**

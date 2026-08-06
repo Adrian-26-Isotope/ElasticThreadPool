@@ -277,6 +277,12 @@ public class CustomThreadPool extends AbstractExecutorService {
         // enqueued and then "missed" by the termination check below.
         if (getState() == ThreadPoolState.RUNNING) {
             setState(ThreadPoolState.SHUTDOWN);
+            // wake idle workers promptly instead of waiting out idleTime (see Worker.interruptIfIdle()).
+            synchronized (this.workers) {
+                for (Worker worker : this.workers) {
+                    worker.interruptIfIdle();
+                }
+            }
             checkTermination();
         }
     }
@@ -347,7 +353,7 @@ public class CustomThreadPool extends AbstractExecutorService {
 
     protected Runnable pollTask(final Worker worker) {
         var context = new ThreadPoolState.WorkerPollContext(this.tasks, this.idleTime, worker.isCore(),
-                worker.getThread(), this::isRunning);
+                worker.getThread());
         return getState().pollTask(context);
     }
 

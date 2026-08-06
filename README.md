@@ -70,7 +70,7 @@ threadPool.shutdown();
 | `name` | JVM default | Name prefix for worker threads |
 | `minThreads` | `0` | Minimum number of core threads that persist even when idle |
 | `maxThreads` | `Integer.MAX_VALUE` | Maximum number of threads that can be created |
-| `idleTime` | `10 seconds` | Time after which idle non-core threads are terminated |
+| `idleTime` | `10 seconds` | Time after which idle non-core threads are terminated. Only governs non-core workers; core threads (up to `minThreads`) always wait indefinitely for the next task, regardless of `idleTime`, including `Duration.ZERO` |
 | `threadFactory` | `Thread.ofVirtual().factory()` | Factory for creating new threads |
 
 ## Architecture
@@ -84,7 +84,8 @@ threadPool.shutdown();
   calling thread
 - **`ThreadPoolState`**: Enum representing the pool's lifecycle state, where each
   constant also defines its own task polling behavior:
-  - `RUNNING`: Workers block-poll for tasks, waiting up to the idle timeout
+  - `RUNNING`: Core workers block indefinitely for the next task (`take()`); non-core workers block up to
+    `idleTime` before giving up (`poll(idleTime)`)
   - `SHUTDOWN`: Workers drain remaining tasks without blocking
   - `NOT_RUNNING`: Workers always receive `null` (no more tasks to process)
 

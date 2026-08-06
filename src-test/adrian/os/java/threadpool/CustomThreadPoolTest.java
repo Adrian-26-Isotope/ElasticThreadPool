@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadMXBean;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -164,8 +166,9 @@ class CustomThreadPoolTest {
         assertEquals(4, customThreadPool.getWorkers().size()); // idle time has not yet elapsed
         customThreadPool.shutdown();
         assertTrue(customThreadPool.isShutdown());
-        assertEquals(4, customThreadPool.getWorkers().size()); // idle time has not yet elapsed
-        Thread.sleep(5000); // give the threads time to terminate
+        // idle workers are woken by shutdown()'s interruptIfIdle() and exit promptly, well before the
+        // configured 5-second idleTime would otherwise elapse.
+        assertTrue(customThreadPool.awaitTermination(1, TimeUnit.SECONDS));
         assertEquals(0, customThreadPool.getWorkers().size(), "thread pool has been shut down");
         assertTrue(customThreadPool.isTerminated());
         assertThrows(RejectedExecutionException.class, () -> customThreadPool.submit(createRunnable(10000)));
@@ -484,6 +487,90 @@ class CustomThreadPoolTest {
 
         assertEquals(failure, caught.get());
         customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testIdleTimeZeroCoreWorkersDoNotBusySpin() throws InterruptedException {
+        // Regression test for the busy-spin bug: with idleTime == ZERO, core workers used to loop calling
+        // poll(0, NANOSECONDS) as fast as possible instead of blocking in take(), pegging a CPU core.
+        // Uses a platform thread factory so ThreadMXBean can reliably report CPU time.
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2).setIdleTime(Duration.ZERO)
+                .setThreadFactory(Thread.ofPlatform().factory()).start();
+        assertEquals(2, customThreadPool.getWorkers().size());
+
+        ThreadMXBean threadMxBean = ManagementFactory.getThreadMXBean();
+        List<Long> threadIds = customThreadPool.getWorkers().stream().map(worker -> worker.getThread().threadId())
+                .toList();
+
+        Thread.sleep(200);
+        long cpuBefore = threadIds.stream().mapToLong(threadMxBean::getThreadCpuTime).sum();
+        Thread.sleep(500);
+        long cpuAfter = threadIds.stream().mapToLong(threadMxBean::getThreadCpuTime).sum();
+
+        long cpuMillisUsed = (cpuAfter - cpuBefore) / 1_000_000;
+        assertTrue(cpuMillisUsed < 100,
+                "core workers used " + cpuMillisUsed + "ms of CPU while idle - indicates a busy-spin");
+
+        customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testIdleTimeZeroNonCoreWorkersExitImmediately() throws InterruptedException {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ZERO)
+                .setName("ZERO-NONCORE").start();
+        for (int i = 1; i <= 5; i++) {
+            customThreadPool.submit(createRunnable(100));
+        }
+        Thread.sleep(100);
+        assertEquals(5, customThreadPool.getWorkers().size());
+        Thread.sleep(300); // no idleTime wait: workers should already be gone
+        assertEquals(0, customThreadPool.getWorkers().size());
+
+        customThreadPool.shutdownNow();
+    }
+
+    @Test
+    void testShutdownWakesIdleWorkersPromptly() throws InterruptedException {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2)
+                .setIdleTime(Duration.ofSeconds(30)).setName("WAKE").start();
+        assertEquals(2, customThreadPool.getWorkers().size());
+        Thread.sleep(100);
+
+        customThreadPool.shutdown();
+        assertTrue(customThreadPool.awaitTermination(1, TimeUnit.SECONDS),
+                "shutdown() should wake idle workers immediately instead of waiting out idleTime");
+    }
+
+    @Test
+    void testShutdownDoesNotInterruptRunningTask() throws InterruptedException {
+        AtomicBoolean interruptedDuringTask = new AtomicBoolean(false);
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setName("NO-INTERRUPT").start();
+        customThreadPool.submit(() -> {
+            try {
+                Thread.sleep(500);
+            }
+            catch (InterruptedException ex) {
+                interruptedDuringTask.set(true);
+                Thread.currentThread().interrupt();
+            }
+        });
+        Thread.sleep(100);
+        customThreadPool.shutdown();
+        assertTrue(customThreadPool.awaitTermination(2, TimeUnit.SECONDS));
+        assertFalse(interruptedDuringTask.get(), "a running task must not be interrupted by a graceful shutdown()");
+    }
+
+    @Test
+    void testIdleTimeZeroShutdownNow() throws InterruptedException {
+        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setIdleTime(Duration.ZERO)
+                .setName("ZERO-NOW").start();
+        customThreadPool.submit(createRunnable(5000));
+        Thread.sleep(100);
+        List<Runnable> unfinished = customThreadPool.shutdownNow();
+        assertTrue(customThreadPool.awaitTermination(1, TimeUnit.SECONDS));
+        assertTrue(customThreadPool.isTerminated());
+        assertEquals(0, customThreadPool.getWorkers().size());
+        assertTrue(unfinished.isEmpty()); // already picked up by the worker before shutdownNow() ran
     }
 
     private Runnable createRunnable(final int milliseconds) {
