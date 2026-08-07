@@ -1,14 +1,14 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Worker to execute tasks for the {@link CustomThreadPool}.
+ * Worker to execute tasks for the {@link ElasticThreadPool}.
  */
 public class Worker implements Runnable {
 
-    private final CustomThreadPool threadPool;
+    private final ElasticThreadPool threadPool;
     private final boolean core;
     private final Thread thread;
     private final AtomicLong completedTasksCount = new AtomicLong(0);
@@ -19,7 +19,7 @@ public class Worker implements Runnable {
      * @param customThreadPool the thread pool that manages this worker.
      * @param keepAlive true if this shall be a core worker and not terminate.
      */
-    protected Worker(final CustomThreadPool customThreadPool, final boolean keepAlive) {
+    protected Worker(final ElasticThreadPool customThreadPool, final boolean keepAlive) {
         this.threadPool = customThreadPool;
         this.core = keepAlive;
         this.thread = getThreadPool().getThreadFactory().newThread(this);
@@ -35,7 +35,7 @@ public class Worker implements Runnable {
     /**
      * @return the thread pool that manages this worker.
      */
-    protected CustomThreadPool getThreadPool() {
+    protected ElasticThreadPool getThreadPool() {
         return this.threadPool;
     }
 
@@ -56,7 +56,7 @@ public class Worker implements Runnable {
     @Override
     public void run() {
         // must be set before the first getTask() call: it's what tells interruptIfIdle() this worker has actually
-        // started (as opposed to merely being added to CustomThreadPool.workers and about to be started), so a
+        // started (as opposed to merely being added to ElasticThreadPool.workers and about to be started), so a
         // pending interrupt can never suppress this thread's very first task fetch (see interruptIfIdle()).
         this.started = true;
         try {
@@ -103,7 +103,7 @@ public class Worker implements Runnable {
      * {@link #runTask(Runnable)} is executing, so successfully acquiring it here (without blocking) is proof this
      * worker is idle - either blocked in {@code take()}/{@code poll()}, or about to call one of them.<br>
      * <br>
-     * {@link #started} additionally guards a worker that has been added to {@link CustomThreadPool#getWorkers()} but
+     * {@link #started} additionally guards a worker that has been added to {@link ElasticThreadPool#getWorkers()} but
      * whose thread has not yet begun {@link #run()}: {@link #runLock} would still be free at that point too, but
      * interrupting it now would set the interrupt flag before {@link #run()}'s loop ever runs, causing it to exit
      * without ever calling {@link #getTask()} - silently abandoning the very task it was started to drain.
@@ -122,7 +122,7 @@ public class Worker implements Runnable {
     /**
      * this handles exceptions thrown by the tasks, by delegating to this worker's thread's
      * {@link Thread.UncaughtExceptionHandler}, the same pluggable mechanism used for uncaught exceptions elsewhere.
-     * Callers can customize it via the {@link CustomThreadPool}'s {@link java.util.concurrent.ThreadFactory}.
+     * Callers can customize it via the {@link ElasticThreadPool}'s {@link java.util.concurrent.ThreadFactory}.
      */
     protected void handleTaskError(final Exception exception) {
         getThread().getUncaughtExceptionHandler().uncaughtException(getThread(), exception);

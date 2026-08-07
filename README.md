@@ -1,6 +1,6 @@
 [![Java CI with Maven](https://github.com/Adrian-26-Isotope/CustomJavaThreadPool/actions/workflows/maven.yml/badge.svg?branch=main)](https://github.com/Adrian-26-Isotope/CustomJavaThreadPool/actions/workflows/maven.yml)
 
-# CustomThreadPool
+# ElasticThreadPool
 
 A flexible and efficient custom thread pool implementation in Java that provides variable thread management with configurable minimum and maximum thread counts, idle timeouts, and different task polling strategies.
 
@@ -56,7 +56,7 @@ concurrent submitters aren't serialized behind the sizing logic.
 
 ### Comparison
 
-| Aspect | `ThreadPoolExecutor` | `CustomThreadPool` |
+| Aspect | `ThreadPoolExecutor` | `ElasticThreadPool` |
 |--------|----------------------|--------------------|
 | Scale-up trigger | Queue `offer()` returns `false` | `workerDemand > 0` (real backlog) |
 | Scale-up with unbounded queue | **Never happens** | Works normally |
@@ -82,10 +82,10 @@ Unlike Jetty's `QueuedThreadPool` (which is tightly coupled to Jetty internals s
 ### Basic Usage
 
 ```java
-import adrian.os.java.threadpool.CustomThreadPool;
+import org.adrian.threadpool.ElasticThreadPool;
 
 // Create a thread pool with default settings
-CustomThreadPool threadPool = CustomThreadPool.builder().start();
+ElasticThreadPool threadPool = ElasticThreadPool.builder().start();
 
 // Submit a task
 threadPool.submit(() -> {
@@ -102,7 +102,7 @@ threadPool.shutdown();
 import java.time.Duration;
 import java.util.concurrent.ThreadFactory;
 
-CustomThreadPool threadPool = CustomThreadPool.builder()
+ElasticThreadPool threadPool = ElasticThreadPool.builder()
     .setName("MyWorker")                               // Name prefix for worker threads
     .setMinThreads(2)                                  // Minimum 2 core threads
     .setMaxThreads(10)                                 // Maximum 10 threads
@@ -140,7 +140,7 @@ threadPool.shutdown();
 
 ### Core Components
 
-- **`CustomThreadPool`**: Main thread pool implementation extending `AbstractExecutorService`
+- **`ElasticThreadPool`**: Main thread pool implementation extending `AbstractExecutorService`
 - **`Worker`**: Individual worker threads that execute tasks
 - **`WorkerAdjuster`**: Dedicated background thread that reacts to task submissions by
   performing worker count adjustments asynchronously, decoupling that work from the
@@ -171,7 +171,7 @@ ThreadFactory factory = Thread.ofVirtual()
     .uncaughtExceptionHandler((thread, ex) -> log.error("Task failed on " + thread.getName(), ex))
     .factory();
 
-CustomThreadPool pool = CustomThreadPool.builder()
+ElasticThreadPool pool = ElasticThreadPool.builder()
     .setThreadFactory(factory)
     .build();
 ```
@@ -191,7 +191,7 @@ The thread pool can be manually controlled using `start()`, `shutdown()`, and `s
 ## Examples
 
 ```java
-CustomThreadPool pool = CustomThreadPool.builder()
+ElasticThreadPool pool = ElasticThreadPool.builder()
     .setMinThreads(Runtime.getRuntime().availableProcessors())
     .setMaxThreads(Runtime.getRuntime().availableProcessors())
     .setThreadFactory(Thread.ofPlatform().factory())
@@ -208,7 +208,7 @@ for (int i = 0; i < 1000; i++) {
 ```
 
 ```java
-CustomThreadPool pool = CustomThreadPool.builder()
+ElasticThreadPool pool = ElasticThreadPool.builder()
     .setMinThreads(0)
     .setMaxThreads(1000)
     .setIdleTime(Duration.ofSeconds(5))
@@ -227,7 +227,7 @@ for (int i = 0; i < 10000; i++) {
 }
 ```
 
-See [CustomThreadPoolTest.java](src-test/adrian/os/java/threadpool/CustomThreadPoolTest.java) for more examples.
+See [ElasticThreadPoolTest.java](src-test/org/adrian/threadpool/ElasticThreadPoolTest.java) for more examples.
 
 ## Requirements
 

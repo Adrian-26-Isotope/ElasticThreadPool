@@ -1,4 +1,4 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -52,11 +52,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * something neither {@code ThreadPoolExecutor} nor {@code Executors.newVirtualThreadPerTaskExecutor()} combined with a
  * semaphore provides.
  */
-public class CustomThreadPool extends AbstractExecutorService {
+public class ElasticThreadPool extends AbstractExecutorService {
 
     /**
      * default capacity of the task queue used when no queue is explicitly supplied (see
-     * {@link CustomThreadPoolBuilder#setQueue(BlockingQueue)}): {@value}.
+     * {@link ElasticThreadPoolBuilder#setQueue(BlockingQueue)}): {@value}.
      */
     public static final int DEFAULT_QUEUE_CAPACITY = 10_000;
 
@@ -79,10 +79,10 @@ public class CustomThreadPool extends AbstractExecutorService {
     private final WorkerDemand workerDemand = new WorkerDemand();
 
     /**
-     * @return a {@link CustomThreadPool} builder.
+     * @return a {@link ElasticThreadPool} builder.
      */
-    public static CustomThreadPoolBuilder builder() {
-        return new CustomThreadPoolBuilder();
+    public static ElasticThreadPoolBuilder builder() {
+        return new ElasticThreadPoolBuilder();
     }
 
     /**
@@ -100,7 +100,7 @@ public class CustomThreadPool extends AbstractExecutorService {
      *                     bounded queue of any capacity, an unbounded queue, or any other {@link BlockingQueue}
      *                     implementation (e.g. {@code PriorityBlockingQueue}). Must not be {@code null}.
      */
-    public CustomThreadPool(final int minThreads, final int maxThreads, final Duration idleDuration,
+    public ElasticThreadPool(final int minThreads, final int maxThreads, final Duration idleDuration,
             final ThreadFactory threadFact, final BlockingQueue<Runnable> queue) {
         if ((minThreads < 0) || (maxThreads < 1) || (minThreads > maxThreads)) {
             throw new IllegalArgumentException("invalid min/max threads: min=" + minThreads + ", max=" + maxThreads);
@@ -386,9 +386,9 @@ public class CustomThreadPool extends AbstractExecutorService {
     }
 
     /**
-     * builder for {@link CustomThreadPool}.
+     * builder for {@link ElasticThreadPool}.
      */
-    public static class CustomThreadPoolBuilder {
+    public static class ElasticThreadPoolBuilder {
 
         private String name = "";
         private int minThreads = 0;
@@ -402,7 +402,7 @@ public class CustomThreadPool extends AbstractExecutorService {
          * <br>
          * Default is JVM name.
          */
-        public CustomThreadPoolBuilder setName(final String name) {
+        public ElasticThreadPoolBuilder setName(final String name) {
             this.name = name;
             return this;
         }
@@ -412,7 +412,7 @@ public class CustomThreadPool extends AbstractExecutorService {
          * <br>
          * Default is 0.
          */
-        public CustomThreadPoolBuilder setMinThreads(final int min) {
+        public ElasticThreadPoolBuilder setMinThreads(final int min) {
             this.minThreads = min;
             return this;
         }
@@ -422,7 +422,7 @@ public class CustomThreadPool extends AbstractExecutorService {
          * <br>
          * Default is 256.
          */
-        public CustomThreadPoolBuilder setMaxThreads(final int max) {
+        public ElasticThreadPoolBuilder setMaxThreads(final int max) {
             this.maxThreads = max;
             return this;
         }
@@ -432,7 +432,7 @@ public class CustomThreadPool extends AbstractExecutorService {
          * <br>
          * Default is 1 seconds.
          */
-        public CustomThreadPoolBuilder setIdleTime(final Duration idleTime) {
+        public ElasticThreadPoolBuilder setIdleTime(final Duration idleTime) {
             this.idleDuration = idleTime;
             return this;
         }
@@ -442,7 +442,7 @@ public class CustomThreadPool extends AbstractExecutorService {
          * <br>
          * {@code Thread.ofVirtual().factory()} is the default factory.
          */
-        public CustomThreadPoolBuilder setThreadFactory(final ThreadFactory factory) {
+        public ElasticThreadPoolBuilder setThreadFactory(final ThreadFactory factory) {
             this.threadFactory = factory;
             return this;
         }
@@ -453,19 +453,19 @@ public class CustomThreadPool extends AbstractExecutorService {
          * {@link BlockingQueue} implementation entirely.<br>
          * <br>
          * Default is a bounded {@link LinkedBlockingQueue} with capacity
-         * {@link CustomThreadPool#DEFAULT_QUEUE_CAPACITY}. Passing {@code null} resets to that default.
+         * {@link ElasticThreadPool#DEFAULT_QUEUE_CAPACITY}. Passing {@code null} resets to that default.
          *
          * @param queue the task queue to use, or {@code null} to reset to the default bounded queue.
          */
-        public CustomThreadPoolBuilder setQueue(final BlockingQueue<Runnable> queue) {
+        public ElasticThreadPoolBuilder setQueue(final BlockingQueue<Runnable> queue) {
             this.queue = queue;
             return this;
         }
 
         /**
-         * @return the newly constructed, un-started {@link CustomThreadPool}.
+         * @return the newly constructed, un-started {@link ElasticThreadPool}.
          */
-        public CustomThreadPool build() {
+        public ElasticThreadPool build() {
             if (this.threadFactory == null) {
                 if ((this.name != null) && !this.name.isBlank()) {
                     this.threadFactory = Thread.ofVirtual().name(this.name + "#", 0).factory();
@@ -475,15 +475,15 @@ public class CustomThreadPool extends AbstractExecutorService {
                 }
             }
             BlockingQueue<Runnable> effectiveQueue = this.queue != null ? this.queue
-                    : new LinkedBlockingQueue<>(CustomThreadPool.DEFAULT_QUEUE_CAPACITY);
-            return new CustomThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory,
+                    : new LinkedBlockingQueue<>(ElasticThreadPool.DEFAULT_QUEUE_CAPACITY);
+            return new ElasticThreadPool(this.minThreads, this.maxThreads, this.idleDuration, this.threadFactory,
                     effectiveQueue);
         }
 
         /**
-         * @return the newly constructed, already started {@link CustomThreadPool}.
+         * @return the newly constructed, already started {@link ElasticThreadPool}.
          */
-        public CustomThreadPool start() {
+        public ElasticThreadPool start() {
             var pool = build();
             pool.start();
             return pool;

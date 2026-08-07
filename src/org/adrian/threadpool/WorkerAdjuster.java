@@ -1,18 +1,18 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 /**
- * Dedicated background worker that reacts to {@link CustomThreadPool#execute(Runnable)} calls by running
- * {@link CustomThreadPool#performAdjustment()} on its own thread, decoupling that (potentially expensive) work from the
+ * Dedicated background worker that reacts to {@link ElasticThreadPool#execute(Runnable)} calls by running
+ * {@link ElasticThreadPool#performAdjustment()} on its own thread, decoupling that (potentially expensive) work from the
  * thread calling {@code execute()}.
  */
 class WorkerAdjuster implements Runnable {
 
-    private final CustomThreadPool threadPool;
+    private final ElasticThreadPool threadPool;
     private final Thread thread;
     private final Object signalLock = new Object();
     private boolean dirty = false;
 
-    protected WorkerAdjuster(final CustomThreadPool customThreadPool) {
+    protected WorkerAdjuster(final ElasticThreadPool customThreadPool) {
         this.threadPool = customThreadPool;
         this.thread = this.threadPool.getThreadFactory().newThread(this);
         this.thread.start();

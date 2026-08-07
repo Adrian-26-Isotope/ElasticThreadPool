@@ -1,14 +1,14 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 import java.time.Duration;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 /**
- * State of a {@link CustomThreadPool}. Each constant also defines how a {@link Worker} polls for its next task while
+ * State of a {@link ElasticThreadPool}. Each constant also defines how a {@link Worker} polls for its next task while
  * the pool is in that state.<br>
  * <br>
- * This enum is deliberately decoupled from {@link Worker} and {@link CustomThreadPool}: it only ever sees a
+ * This enum is deliberately decoupled from {@link Worker} and {@link ElasticThreadPool}: it only ever sees a
  * {@link WorkerPollContext} snapshot, never the live objects themselves.
  */
 enum ThreadPoolState {
@@ -74,7 +74,7 @@ enum ThreadPoolState {
 
     /**
      * Immutable snapshot of exactly what a {@link ThreadPoolState} needs to poll the next task for a worker, decoupling
-     * this state machine from the {@link Worker}/{@link CustomThreadPool} types themselves.
+     * this state machine from the {@link Worker}/{@link ElasticThreadPool} types themselves.
      *
      * @param tasks    the task queue to poll from.
      * @param idleTime the duration a non core worker may block waiting for a task before giving up.

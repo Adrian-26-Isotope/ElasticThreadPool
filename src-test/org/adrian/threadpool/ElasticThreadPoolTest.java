@@ -1,4 +1,4 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,15 +23,15 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
-class CustomThreadPoolTest {
+class ElasticThreadPoolTest {
 
     @Test
     void testInitialTreads() {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(5).start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(5).start();
         assertEquals(5, customThreadPool.getWorkers().size(), "Initial thread count should be 5");
         customThreadPool.shutdown();
 
-        customThreadPool = CustomThreadPool.builder().setMinThreads(0).start();
+        customThreadPool = ElasticThreadPool.builder().setMinThreads(0).start();
         assertEquals(0, customThreadPool.getWorkers().size(), "Initial thread count should be 0");
 
         customThreadPool.shutdownNow();
@@ -39,7 +39,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testMaxTreads() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(2).start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMaxThreads(2).start();
         assertEquals(0, customThreadPool.getWorkers().size(), "Initial thread count should be 0");
         for (int i = 1; i <= 2; i++) {
             customThreadPool.submit(createRunnable(5000));
@@ -54,15 +54,15 @@ class CustomThreadPoolTest {
 
     @Test
     void testDefaultQueueCapacity() {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
-        assertEquals(CustomThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
-                "default queue capacity should be " + CustomThreadPool.DEFAULT_QUEUE_CAPACITY);
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().start();
+        assertEquals(ElasticThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
+                "default queue capacity should be " + ElasticThreadPool.DEFAULT_QUEUE_CAPACITY);
         customThreadPool.shutdownNow();
     }
 
     @Test
     void testCustomQueue() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(1)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMaxThreads(1)
                 .setQueue(new ArrayBlockingQueue<>(2)).start();
         // occupies the sole worker
         customThreadPool.submit(createRunnable(5000));
@@ -78,16 +78,16 @@ class CustomThreadPoolTest {
 
     @Test
     void testSetQueueNullResetsToDefault() {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setQueue(new ArrayBlockingQueue<>(5))
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setQueue(new ArrayBlockingQueue<>(5))
                 .setQueue(null).start();
-        assertEquals(CustomThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
+        assertEquals(ElasticThreadPool.DEFAULT_QUEUE_CAPACITY, customThreadPool.getTasks().remainingCapacity(),
                 "setQueue(null) should reset to the default bounded queue");
         customThreadPool.shutdownNow();
     }
 
     @Test
     void testIdleTreads() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(2)
                 .setIdleTime(Duration.ofSeconds(1)).setName("IDLE").start();
         assertEquals(2, customThreadPool.getWorkers().size());
         Thread.sleep(2000); // Wait for idle time to expire
@@ -110,12 +110,12 @@ class CustomThreadPoolTest {
         // silently accumulate. Run several submit-and-drain cycles and assert it always returns
         // to exactly 0 once the queue is empty and every worker has idled out - any drift here
         // would prove the counter leaks.
-        CustomThreadPool pool1 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P1").start();
-        CustomThreadPool pool2 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P2")
+        ElasticThreadPool pool1 = ElasticThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P1").start();
+        ElasticThreadPool pool2 = ElasticThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P2")
                 .setMinThreads(2).start();
-        CustomThreadPool pool3 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P3")
+        ElasticThreadPool pool3 = ElasticThreadPool.builder().setIdleTime(Duration.ofMillis(100)).setName("P3")
                 .setMaxThreads(3).start();
-        CustomThreadPool pool4 = CustomThreadPool.builder().setIdleTime(Duration.ofMillis(2000)).setName("P4").start();
+        ElasticThreadPool pool4 = ElasticThreadPool.builder().setIdleTime(Duration.ofMillis(2000)).setName("P4").start();
         for (int cycle = 1; cycle <= 5; cycle++) {
             for (int i = 0; i < 8; i++) {
                 pool1.submit(createRunnable(0));
@@ -153,7 +153,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testTaskQueue() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMaxThreads(4)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMaxThreads(4)
                 .setIdleTime(Duration.ofMillis(1)).setName("QUEUE").start();
         assertEquals(0, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 20; i++) {
@@ -173,8 +173,8 @@ class CustomThreadPoolTest {
         // to drain its queue, so a submitted task would sit forever and a graceful
         // shutdown() would hang (workers empty, tasks never empty). Must be rejected
         // up front instead.
-        assertThrows(IllegalArgumentException.class, () -> CustomThreadPool.builder().setMaxThreads(0).build());
-        assertThrows(IllegalArgumentException.class, () -> CustomThreadPool.builder().setMaxThreads(-1).build());
+        assertThrows(IllegalArgumentException.class, () -> ElasticThreadPool.builder().setMaxThreads(0).build());
+        assertThrows(IllegalArgumentException.class, () -> ElasticThreadPool.builder().setMaxThreads(-1).build());
     }
 
     @Test
@@ -182,12 +182,12 @@ class CustomThreadPoolTest {
         // Regression test: negative minThreads used to reach `new ArrayList<>(minThreads)`
         // and throw ArrayList's unrelated "Illegal Capacity" exception instead of a clear,
         // explicit validation error.
-        assertThrows(IllegalArgumentException.class, () -> CustomThreadPool.builder().setMinThreads(-1).build());
+        assertThrows(IllegalArgumentException.class, () -> ElasticThreadPool.builder().setMinThreads(-1).build());
     }
 
     @Test
     void testShutdown() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setMaxThreads(4)
                 .setIdleTime(Duration.ofSeconds(5)).setName("SHUTDOWN").start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
@@ -213,7 +213,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testShutdownNow() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setMaxThreads(4)
                 .setIdleTime(Duration.ofSeconds(1)).start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
@@ -238,7 +238,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testRestart() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(4)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setMaxThreads(4)
                 .setIdleTime(Duration.ofSeconds(1)).start();
         assertEquals(1, customThreadPool.getWorkers().size());
         assertTrue(customThreadPool.isRunning());
@@ -270,7 +270,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testAwaitTermination1() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().start();
         assertTrue(customThreadPool.isRunning());
         customThreadPool.shutdown(); // immediately terminate
         assertTrue(customThreadPool.awaitTermination(1, TimeUnit.SECONDS));
@@ -279,7 +279,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testAwaitTermination2() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().start();
         for (int i = 1; i <= 10; i++) {
             customThreadPool.submit(createRunnable(2000));
         }
@@ -304,7 +304,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testExecute() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(5)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setMaxThreads(5)
                 .setIdleTime(Duration.ofSeconds(1)).setName("EXE").start();
         assertTrue(customThreadPool.isRunning());
         assertEquals(1, customThreadPool.getWorkers().size());
@@ -324,7 +324,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testReuseThreads() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(5))
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setIdleTime(Duration.ofSeconds(5))
                 .setName("REUSE").start();
         assertEquals(0, customThreadPool.getWorkers().size());
         for (int i = 1; i <= 5; i++) {
@@ -350,7 +350,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testCallable() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setMaxThreads(5)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setMaxThreads(5)
                 .setIdleTime(Duration.ofSeconds(1)).setName("CALLABLE").start();
         assertTrue(customThreadPool.isRunning());
         assertEquals(1, customThreadPool.getWorkers().size());
@@ -367,7 +367,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testCompleteCount() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setIdleTime(Duration.ofSeconds(1))
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setIdleTime(Duration.ofSeconds(1))
                 .setName("COUNT").start();
         assertTrue(customThreadPool.isRunning());
         for (int i = 1; i <= 9; i++) {
@@ -397,7 +397,7 @@ class CustomThreadPoolTest {
     void testCompletedTasksCountNeverExceedsSubmittedUnderConcurrentReads() throws InterruptedException {
         // Regression test
         final int taskCount = 60;
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setMaxThreads(30)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(0).setMaxThreads(30)
                 .setIdleTime(Duration.ofMillis(20)).setName("RACE-COUNT").start();
 
         // Many short tasks with a tiny idle time cause rapid, continuous worker
@@ -437,7 +437,7 @@ class CustomThreadPoolTest {
     @Test
     void testAwaitTerminationReturnsPromptlyOnTermination() throws InterruptedException {
         // Regression test for a missed-wakeup race
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setName("PROMPT").start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setName("PROMPT").start();
         customThreadPool.submit(createRunnable(0));
         customThreadPool.shutdown();
 
@@ -454,7 +454,7 @@ class CustomThreadPoolTest {
     void testAwaitTerminationDoesNotThrowWithTinyTimeout() throws InterruptedException {
         // Regression test for a very little timeout duration.
         for (int i = 0; i < 50; i++) {
-            CustomThreadPool customThreadPool = CustomThreadPool.builder().setName("TINY-" + i).start();
+            ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setName("TINY-" + i).start();
             customThreadPool.submit(createRunnable(0));
             customThreadPool.shutdown();
             assertDoesNotThrow(() -> customThreadPool.awaitTermination(1, TimeUnit.NANOSECONDS));
@@ -470,7 +470,7 @@ class CustomThreadPoolTest {
         // stranding the task forever while isTerminated() reported true.
         final int iterations = 200;
         for (int i = 0; i < iterations; i++) {
-            CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setMaxThreads(4)
+            ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(0).setMaxThreads(4)
                     .setIdleTime(Duration.ofMillis(50)).setName("RACE-SHUTDOWN-" + i).start();
 
             AtomicBoolean taskRan = new AtomicBoolean(false);
@@ -510,7 +510,7 @@ class CustomThreadPoolTest {
     void testTaskExceptionReachesUncaughtExceptionHandler() throws InterruptedException {
         AtomicReference<Throwable> caught = new AtomicReference<>();
         ThreadFactory factory = Thread.ofVirtual().uncaughtExceptionHandler((thread, ex) -> caught.set(ex)).factory();
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setThreadFactory(factory)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setThreadFactory(factory)
                 .start();
 
         RuntimeException failure = new RuntimeException("boom");
@@ -528,7 +528,7 @@ class CustomThreadPoolTest {
         // Regression test for the busy-spin bug: with idleTime == ZERO, core workers used to loop calling
         // poll(0, NANOSECONDS) as fast as possible instead of blocking in take(), pegging a CPU core.
         // Uses a platform thread factory so ThreadMXBean can reliably report CPU time.
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2).setIdleTime(Duration.ZERO)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(2).setIdleTime(Duration.ZERO)
                 .setThreadFactory(Thread.ofPlatform().factory()).start();
         assertEquals(2, customThreadPool.getWorkers().size());
 
@@ -550,7 +550,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testIdleTimeZeroNonCoreWorkersExitImmediately() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ZERO)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ZERO)
                 .setName("ZERO-NONCORE").start();
         for (int i = 1; i <= 5; i++) {
             customThreadPool.submit(createRunnable(100));
@@ -565,7 +565,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testShutdownWakesIdleWorkersPromptly() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(2)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(2)
                 .setIdleTime(Duration.ofSeconds(30)).setName("WAKE").start();
         assertEquals(2, customThreadPool.getWorkers().size());
         Thread.sleep(100);
@@ -578,7 +578,7 @@ class CustomThreadPoolTest {
     @Test
     void testShutdownDoesNotInterruptRunningTask() throws InterruptedException {
         AtomicBoolean interruptedDuringTask = new AtomicBoolean(false);
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setName("NO-INTERRUPT").start();
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setName("NO-INTERRUPT").start();
         customThreadPool.submit(() -> {
             try {
                 Thread.sleep(500);
@@ -596,7 +596,7 @@ class CustomThreadPoolTest {
 
     @Test
     void testIdleTimeZeroShutdownNow() throws InterruptedException {
-        CustomThreadPool customThreadPool = CustomThreadPool.builder().setMinThreads(1).setIdleTime(Duration.ZERO)
+        ElasticThreadPool customThreadPool = ElasticThreadPool.builder().setMinThreads(1).setIdleTime(Duration.ZERO)
                 .setName("ZERO-NOW").start();
         customThreadPool.submit(createRunnable(5000));
         Thread.sleep(100);

@@ -1,9 +1,9 @@
-package adrian.os.java.threadpool;
+package org.adrian.threadpool;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Tracks {@link CustomThreadPool}'s net demand for workers, i.e. {@code pendingTasks - idleWorkers}, maintained
+ * Tracks {@link ElasticThreadPool}'s net demand for workers, i.e. {@code pendingTasks - idleWorkers}, maintained
  * incrementally rather than ever being recomputed from scratch. Deliberately exposes no generic increment/decrement:
  * every mutation is a named event method below, so a call site can only record one of the events it was designed for,
  * not an arbitrary atomic op.<br>
@@ -19,9 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <li>event E, {@code +1}: a worker terminates ({@link #recordWorkerStopped()}): idle capacity is removed again.
  * Unconditional - event F (a worker terminating while still busy) never happens with this {@link Worker}
  * implementation, since its run loop only ever exits in the idle state (see
- * {@code CustomThreadPool.stopWorker()}).</li>
+ * {@code ElasticThreadPool.stopWorker()}).</li>
  * <li>event G, {@code -N}: {@code N} queued tasks are discarded unclaimed ({@link #recordTasksDiscarded(int)}, from
- * {@code CustomThreadPool.shutdownNow()} draining the queue): demand raised for them at enqueue time must be withdrawn
+ * {@code ElasticThreadPool.shutdownNow()} draining the queue): demand raised for them at enqueue time must be withdrawn
  * since no worker will ever claim them.</li>
  * </ul>
  * Event B, a worker successfully claiming/dequeuing a task ({@code Worker.getTask()}), is deliberately NOT one of those
