@@ -1,5 +1,6 @@
 package org.adrian.threadpool;
 
+import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -125,7 +126,10 @@ public class Worker implements Runnable {
      * Callers can customize it via the {@link ElasticThreadPool}'s {@link java.util.concurrent.ThreadFactory}.
      */
     protected void handleTaskError(final Exception exception) {
-        getThread().getUncaughtExceptionHandler().uncaughtException(getThread(), exception);
+        UncaughtExceptionHandler exHandler = getThread().getUncaughtExceptionHandler();
+        if (exHandler != null) {
+            exHandler.uncaughtException(getThread(), exception);
+        }
     }
 
 }
